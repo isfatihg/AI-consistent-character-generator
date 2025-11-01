@@ -5,7 +5,6 @@ interface ControlsProps {
   prompt: string;
   setPrompt: (prompt: string) => void;
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  onGenerate: () => void;
   isLoading: boolean;
   selectedPose: Pose;
   characterPrompt: string;
@@ -32,7 +31,6 @@ const Controls: React.FC<ControlsProps> = ({
   prompt,
   setPrompt,
   onFileChange,
-  onGenerate,
   isLoading,
   selectedPose,
   characterPrompt,
@@ -212,14 +210,6 @@ const Controls: React.FC<ControlsProps> = ({
 
         </div>
       )}
-
-      <button
-        onClick={onGenerate}
-        disabled={overallLoading}
-        className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-      >
-        {isLoading ? 'Generating...' : isEditing ? 'Generate Edit' : 'Generate Character Pose'}
-      </button>
     </div>
   );
 };

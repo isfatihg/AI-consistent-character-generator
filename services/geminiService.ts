@@ -24,6 +24,29 @@ const urlToGenerativePart = async (url: string) => {
     };
 };
 
+export const analyzePose = async (poseImageUrl: string): Promise<string> => {
+  if (!process.env.API_KEY) {
+    throw new Error("API_KEY environment variable not set");
+  }
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const poseImagePart = await urlToGenerativePart(poseImageUrl);
+
+  const prompt = "Analyze the provided image and describe the full-body pose of the character in a concise, descriptive phrase. This description will be used as a prompt to generate another character in the same pose. For example, 'a person standing confidently with hands on hips' or 'a character sitting cross-legged on the floor'. Focus only on the pose itself.";
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: {
+      parts: [
+        poseImagePart,
+        { text: prompt },
+      ],
+    },
+  });
+
+  return response.text;
+};
+
+
 export const generateBackgroundFromText = async (
   userPrompt: string
 ): Promise<string> => {
@@ -172,6 +195,7 @@ export const editImage = async (
 export const generateImageFromPose = async (
   characterImage: File | string,
   poseImageUrl: string,
+  poseDescription: string,
   userPrompt: string,
   backgroundImage: File | null,
   apparelImage: File | null
@@ -189,32 +213,37 @@ export const generateImageFromPose = async (
 
   const parts = [characterPart, posePart];
   let promptParts: string[] = [];
+  let stepCounter = 1;
 
-  promptParts.push("1. Analyze the character in the first image. Pay close attention to all details: hairstyle, colors, facial features, and overall style.");
-  promptParts.push("2. Analyze the pose in the second image. This is the target pose for the character.");
-  let imageCounter = 2;
-
+  promptParts.push(`${stepCounter++}. Analyze the character in the first image. Pay close attention to all details: hairstyle, colors, facial features, and overall style.`);
+  promptParts.push(`${stepCounter++}. Analyze the pose in the second image. This is the target pose for the character. The pose is described as: "${poseDescription}".`);
+  
   if (apparelImage) {
     const apparelPart = await fileToGenerativePart(apparelImage);
     parts.push(apparelPart);
-    imageCounter++;
-    promptParts.push(`3. Analyze the apparel in the third image. This is the new outfit for the character.`);
+    promptParts.push(`${stepCounter++}. Analyze the apparel in the third image. This is the new outfit for the character.`);
   }
 
   if (backgroundImage) {
     const backgroundPart = await fileToGenerativePart(backgroundImage);
     parts.push(backgroundPart);
-    imageCounter++;
-    promptParts.push(`${imageCounter}. Analyze the background in the fourth image. This is the new environment.`);
-    promptParts.push(`${imageCounter + 1}. Redraw the character from the first image, dressed in the apparel from the third image, in the exact pose from the second image.`);
-    promptParts.push(`${imageCounter + 2}. Place this newly posed and dressed character convincingly into the background from the fourth image. Ensure lighting and shadows on the character match the background.`);
-  } else {
-    let redrawInstruction = "Redraw the character from the first image in the exact pose shown in the second image.";
+    const bgImageNumber = apparelImage ? 'fourth' : 'third';
+    promptParts.push(`${stepCounter++}. Analyze the background in the ${bgImageNumber} image. This is the new environment.`);
+    
+    let redrawInstruction = `Redraw the character from the first image in the exact pose from the second image.`;
     if (apparelImage) {
-        redrawInstruction = "Redraw the character from the first image, dressed in the apparel from the third image, in the exact pose from the second image."
+        redrawInstruction = `Redraw the character from the first image, dressed in the apparel from the third image, in the exact pose from the second image.`;
     }
-    promptParts.push(`3. ${redrawInstruction}`);
-    promptParts.push(`4. The final image should ONLY contain the character in the new pose. Maintain the background from the original character image unless specified otherwise. Do not include the pose reference image in the output.`);
+    promptParts.push(`${stepCounter++}. ${redrawInstruction}`);
+    promptParts.push(`${stepCounter++}. Place this newly posed and dressed character convincingly into the background from the ${bgImageNumber} image. Ensure lighting and shadows on the character match the background.`);
+
+  } else {
+    let redrawInstruction = `Redraw the character from the first image in the exact pose shown in the second image.`;
+    if (apparelImage) {
+        redrawInstruction = `Redraw the character from the first image, dressed in the apparel from the third image, in the exact pose from the second image.`
+    }
+    promptParts.push(`${stepCounter++}. ${redrawInstruction}`);
+    promptParts.push(`${stepCounter++}. The final image should ONLY contain the character in the new pose. Maintain the background from the original character image unless specified otherwise. Do not include the pose reference image in the output.`);
   }
   
   promptParts.push(`If user instructions are provided, apply them. Instructions: "${userPrompt || 'No additional instructions.'}"`);

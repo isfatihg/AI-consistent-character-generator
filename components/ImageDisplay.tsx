@@ -1,33 +1,55 @@
 import React from 'react';
 import Spinner from './Spinner';
+import { Pose } from '../types';
 
 interface ImageDisplayProps {
   originalImage: string;
   generatedImage: string | null;
-  isLoading: boolean;
+  isLoadingCombined: boolean;
   onViewFullScreen: () => void;
+  onGenerate: () => void;
+  isLoadingGenerate: boolean;
+  isGenerationDisabled: boolean;
+  selectedPose: Pose;
 }
 
-const ImageDisplay: React.FC<ImageDisplayProps> = ({ originalImage, generatedImage, isLoading, onViewFullScreen }) => {
+const ImageDisplay: React.FC<ImageDisplayProps> = ({ 
+  originalImage, 
+  generatedImage, 
+  isLoadingCombined, 
+  onViewFullScreen,
+  onGenerate,
+  isLoadingGenerate,
+  isGenerationDisabled,
+  selectedPose
+}) => {
+  const isEditing = selectedPose.id === 'edit';
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div>
         <h3 className="text-xl font-bold text-center text-gray-200 mb-4">Original Character</h3>
         <div className="bg-gray-800 rounded-lg p-2 shadow-lg">
-          <img src={originalImage} alt="Original character" className="w-full h-auto object-contain rounded-md aspect-square" />
+          <img key={originalImage} src={originalImage} alt="Original character" className="w-full h-auto object-contain rounded-md aspect-square" />
         </div>
       </div>
       <div>
         <h3 className="text-xl font-bold text-center text-gray-200 mb-4">Generated Pose</h3>
+        <button
+          onClick={onGenerate}
+          disabled={isGenerationDisabled}
+          className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-4"
+        >
+          {isLoadingGenerate ? 'Generating...' : isEditing ? 'Generate Edit' : 'Generate Character Pose'}
+        </button>
         <div className="bg-gray-800 rounded-lg p-2 shadow-lg aspect-square flex items-center justify-center relative">
-          {isLoading ? (
+          {isLoadingCombined ? (
             <div className="flex flex-col items-center text-gray-400">
                 <Spinner />
                 <p className="mt-4">Generating your character...</p>
             </div>
           ) : generatedImage ? (
             <>
-              <img src={generatedImage} alt="Generated pose" className="w-full h-auto object-contain rounded-md" />
+              <img key={generatedImage} src={generatedImage} alt="Generated pose" className="w-full h-auto object-contain rounded-md" />
               <div className="absolute bottom-3 right-3 flex items-center gap-2">
                 <button
                   onClick={onViewFullScreen}

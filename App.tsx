@@ -1,12 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, ChangeEvent } from 'react';
 import { POSES, DEFAULT_CHARACTER_IMAGE } from './constants';
 import { Pose } from './types';
 import PoseSelector from './components/PoseSelector';
 import ImageDisplay from './components/ImageDisplay';
 import Controls from './components/Controls';
 import Alert from './components/Alert';
-import { generateImageFromPose, editImage, generateCharacterFromText, generateBackgroundFromText, generateBackgroundFromImage } from './services/geminiService';
+import { generateImageFromPose, editImage, generateCharacterFromText, generateBackgroundFromText, generateBackgroundFromImage, analyzePose } from './services/geminiService';
 import FullScreenModal from './components/FullScreenModal';
+import Spinner from './components/Spinner';
 
 const base64ToFile = (base64: string, filename: string): File => {
   const arr = base64.split(',');
@@ -28,6 +29,7 @@ const base64ToFile = (base64: string, filename: string): File => {
 const App: React.FC = () => {
   const [characterImage, setCharacterImage] = useState<File | string>(DEFAULT_CHARACTER_IMAGE);
   const [characterImageUrl, setCharacterImageUrl] = useState<string>(DEFAULT_CHARACTER_IMAGE);
+  const [poses, setPoses] = useState<Pose[]>(POSES);
   const [selectedPose, setSelectedPose] = useState<Pose>(POSES[1]); // Default to "Standing" pose
   const [prompt, setPrompt] = useState<string>('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -49,6 +51,42 @@ const App: React.FC = () => {
   const [backgroundStyleImageUrl, setBackgroundStyleImageUrl] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+
+  const [posePrompt, setPosePrompt] = useState<string>('');
+  const [isAnalyzingPose, setIsAnalyzingPose] = useState<boolean>(false);
+
+  const analyzePoseAndSetState = useCallback(async (poseToAnalyze: Pose) => {
+    if (poseToAnalyze.id === 'edit') return;
+    setIsAnalyzingPose(true);
+    setError('');
+    setPosePrompt('');
+    try {
+      const description = await analyzePose(poseToAnalyze.imageUrl);
+      setPosePrompt(description);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to analyze pose.');
+      setPosePrompt('Error analyzing pose.');
+    } finally {
+      setIsAnalyzingPose(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    analyzePoseAndSetState(selectedPose);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePoseSelection = (pose: Pose) => {
+    if (pose.id === selectedPose.id) return;
+    setSelectedPose(pose);
+    if (pose.id === 'edit') {
+      setPosePrompt('');
+    } else {
+      analyzePoseAndSetState(pose);
+    }
+  };
+
 
   const clearApparel = () => {
     setApparelImage(null);
@@ -112,6 +150,24 @@ const App: React.FC = () => {
     } else {
         clearBackgroundStyleImage();
     }
+  };
+
+  const handleAddNewPose = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setError('Please upload a valid image file for the pose.');
+        return;
+      }
+      const newPose: Pose = {
+        id: `custom-${Date.now()}`,
+        name: file.name.split('.').slice(0, -1).join('.') || 'Custom Pose',
+        imageUrl: URL.createObjectURL(file),
+      };
+      setPoses(prevPoses => [...prevPoses, newPose]);
+      handlePoseSelection(newPose);
+    }
+    event.target.value = '';
   };
   
   const handleGenerateCharacter = async () => {
@@ -178,6 +234,10 @@ const App: React.FC = () => {
   };
 
   const handleGenerateClick = useCallback(async () => {
+    if (isAnalyzingPose) {
+        setError("Please wait for pose analysis to complete.");
+        return;
+    }
     setIsLoading(true);
     setError('');
     setGeneratedImage(null);
@@ -187,11 +247,16 @@ const App: React.FC = () => {
         setIsLoading(false);
         return;
       }
+      if (selectedPose.id !== 'edit' && (!posePrompt || posePrompt === 'Error analyzing pose.')) {
+        setError("Could not analyze pose. Please try selecting a different pose or try again.");
+        setIsLoading(false);
+        return;
+      }
 
       const result =
         selectedPose.id === 'edit'
           ? await editImage(characterImage, prompt, apparelImage)
-          : await generateImageFromPose(characterImage, selectedPose.imageUrl, prompt, backgroundImage, apparelImage);
+          : await generateImageFromPose(characterImage, selectedPose.imageUrl, posePrompt, prompt, backgroundImage, apparelImage);
           
       setGeneratedImage(result);
     } catch (err: any)
@@ -201,7 +266,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [characterImage, selectedPose, prompt, backgroundImage, apparelImage]);
+  }, [characterImage, selectedPose, prompt, backgroundImage, apparelImage, posePrompt, isAnalyzingPose]);
   
   const handleOpenFullScreen = () => {
     if (generatedImage) {
@@ -212,6 +277,9 @@ const App: React.FC = () => {
   const handleCloseFullScreen = () => {
     setIsModalOpen(false);
   };
+
+  const isOverallLoading = isLoading || isGeneratingCharacter || isGeneratingBackground;
+  const isGenerationDisabled = isOverallLoading || isAnalyzingPose;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-6 lg:p-8">
@@ -232,8 +300,7 @@ const App: React.FC = () => {
                     prompt={prompt}
                     setPrompt={setPrompt}
                     onFileChange={handleFileChange}
-                    onGenerate={handleGenerateClick}
-                    isLoading={isLoading}
+                    isLoading={isOverallLoading}
                     selectedPose={selectedPose}
                     characterPrompt={characterPrompt}
                     setCharacterPrompt={setCharacterPrompt}
@@ -254,7 +321,37 @@ const App: React.FC = () => {
                     onClearBackgroundStyleImage={clearBackgroundStyleImage}
                     onGenerateBackgroundFromImage={handleGenerateBackgroundFromImage}
                 />
-                <PoseSelector poses={POSES} selectedPose={selectedPose} onSelectPose={setSelectedPose} />
+                <PoseSelector 
+                  poses={poses} 
+                  selectedPose={selectedPose} 
+                  onSelectPose={handlePoseSelection} 
+                  isAnalyzing={isAnalyzingPose}
+                  onAddNewPose={handleAddNewPose}
+                />
+
+                {selectedPose.id !== 'edit' && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-200 mb-3">Analyzed Pose Prompt</h3>
+                      {isAnalyzingPose ? (
+                        <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 min-h-[112px] flex items-center justify-center">
+                            <div className="flex items-center gap-3 text-gray-400">
+                              <Spinner />
+                              <span>Analyzing pose...</span>
+                            </div>
+                        </div>
+                      ) : (
+                        <textarea
+                          value={posePrompt}
+                          onChange={(e) => setPosePrompt(e.target.value)}
+                          placeholder="Pose description will be generated here. You can edit it."
+                          className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                          rows={3}
+                          aria-label="Analyzed Pose Prompt"
+                        />
+                      )}
+                  </div>
+                )}
+                
                 {error && <Alert message={error} />}
             </div>
           </div>
@@ -263,8 +360,12 @@ const App: React.FC = () => {
             <ImageDisplay
               originalImage={characterImageUrl}
               generatedImage={generatedImage}
-              isLoading={isLoading || isGeneratingCharacter || isGeneratingBackground}
+              isLoadingCombined={isOverallLoading}
               onViewFullScreen={handleOpenFullScreen}
+              onGenerate={handleGenerateClick}
+              isLoadingGenerate={isLoading}
+              isGenerationDisabled={isGenerationDisabled}
+              selectedPose={selectedPose}
             />
           </div>
         </main>
